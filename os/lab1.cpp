@@ -3,6 +3,9 @@
 #include <queue>
 #include <cstdlib>
 #include <ctime>
+#include <unistd.h>  // 用于usleep函数
+#include <locale.h>  // 用于设置本地化
+#include <ncurses.h> // 用于GUI
 
 // 进程状态
 enum class Status {
@@ -45,7 +48,7 @@ PCB* createProcess() {
     }
 
     if (pid > 100) {
-        std::cerr << "无法创建更多的进程，已达到pid上限。" << std::endl;
+        std::cerr << "Unable to create more processes, PID limit reached." << std::endl;
         return nullptr;
     }
 
@@ -57,41 +60,81 @@ PCB* createProcess() {
     return newProcess;
 }
 
+// 显示进程信息
+void displayProcesses() {
+    clear();  // 清除屏幕
+    printw("PID\tStatus\tPriority\tLife\n");
+    printw("--------------------------------\n");
+    for (int priority = 0; priority < 50; ++priority) {
+        std::queue<PCB*> queue = readyQueues[priority];
+        while (!queue.empty()) {
+            PCB* process = queue.front();
+            queue.pop();
+            printw("%d\t%s\t%d\t%d\n", process->pid, process->status == Status::Ready ? "Ready" : "Run", process->priority, process->life);
+        }
+    }
+    refresh();  // 刷新屏幕
+}
+
 // 调度器
 void scheduler() {
-    for (int priority = 0; priority < 50; ++priority) {
-        while (!readyQueues[priority].empty()) {
-            PCB* process = readyQueues[priority].front();
-            readyQueues[priority].pop();
+    while (true) {
+        int ch = getch();
+        if (ch == 17) {  // ctrl+q
+            break;
+        } else if (ch == 6) {  // ctrl+f
+            createProcess();
+        }
 
-            process->status = Status::Run;  // 将进程状态设置为"运行"
-            std::cout << "运行进程 PID: " << process->pid << "，优先级: " << process->priority << "，生命周期: " << process->life << std::endl;
+        bool processFound = false;
+        for (int priority = 49; priority >= 0; --priority) {
+            if (!readyQueues[priority].empty()) {
+                PCB* process = readyQueues[priority].front();
+                readyQueues[priority].pop();
+                process->status = Status::Run;
+                displayProcesses();
 
-            // 模拟进程运行
-            process->life--;
-            if (process->life > 0) {
-                process->status = Status::Ready;
-                readyQueues[priority].push(process);  // 进程生命周期未结束，放回就绪队列
-            } else {
-                // 进程生命周期结束
-                pidArray[process->pid] = true;  // 释放pid
-                delete process;  // 释放进程控制块
+                usleep(1000000);  // 模拟进程运行一个时间片
+
+                process->priority /= 2;
+                process->life--;
+
+                if (process->life > 0) {
+                    process->status = Status::Ready;
+                    readyQueues[process->priority].push(process);
+                } else {
+                    pidArray[process->pid] = true;
+                    delete process;
+                }
+                processFound = true;
+                break;
             }
+        }
+        if (!processFound) {
+            printw("No ready process available for scheduling.\n");
+            refresh();
+            usleep(1000000);
         }
     }
 }
 
 int main() {
+    setlocale(LC_ALL, "");  // 设置本地化
     srand(time(0));  // 初始化随机数种子
     initializePidArray();
 
-    // 创建一些进程
-    for (int i = 0; i < 10; ++i) {
-        createProcess();
-    }
+    initscr();  // 初始化ncurses
+    cbreak();
+    noecho();
+    timeout(1000);  // 1秒钟超时
 
-    // 调度进程
+    printw("Press Ctrl+F to create a process\n");
+    printw("Press Ctrl+Q to exit the scheduling loop\n");
+    refresh();
+
     scheduler();
 
+    endwin();  // 结束ncurses
     return 0;
 }
+
